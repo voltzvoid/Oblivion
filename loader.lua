@@ -1,6 +1,8 @@
 -- GUI STUFF
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local guiName = "SexyGUI"
 
@@ -34,7 +36,7 @@ end)
 -- 🧱 Configuration
 local categories = {
     {Name = "COMBAT", Buttons = {"KILLAURA"}},
-    {Name = "PLAYER", Buttons = {}},
+    {Name = "PLAYER", Buttons = {"ANTIHIT"}},
     {Name = "MISC",   Buttons = {}},
     {Name = "WORLD",  Buttons = {}},
 }
@@ -114,17 +116,13 @@ local function createButton(parent, text, callback)
     end)
 end
 
---// KILLAURA CODE INTEGRATION
-
---// Services
+--// KILLAURA CODE INTEGRATION (existing code, keep as is)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
---// Remote Event
 local SwordHit = ReplicatedStorage:WaitForChild("rbxts_include")
     .node_modules["@rbxts"].net.out._NetManaged:WaitForChild("SwordHit")
 
---// Constants
 local ATTACK_RADIUS = 10
 local COOLDOWN = 0
 local localPlayer = Players.LocalPlayer
@@ -132,7 +130,6 @@ local lastSwingTime = 0
 local currentHRP = nil
 local killAuraRunning = false
 
---// Utilities
 local function getDistance(pos1, pos2)
     return (pos1 - pos2).Magnitude
 end
@@ -146,7 +143,6 @@ if localPlayer.Character then
 end
 localPlayer.CharacterAdded:Connect(onCharacterAdded)
 
---// Core Logic
 local function getEquippedWeapon()
     local inventoryFolder = ReplicatedStorage:FindFirstChild("Inventories")
     if not inventoryFolder then return nil end
@@ -227,7 +223,6 @@ local function runKillAura()
     end
 end
 
--- Control Functions
 local function startKillAura()
     if not killAuraRunning then
         task.spawn(runKillAura)
@@ -236,6 +231,97 @@ end
 
 local function stopKillAura()
     killAuraRunning = false
+end
+
+--// ANTIHIT CODE INTEGRATION
+
+local Camera = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local function isAlive(plr)
+    plr = plr or LocalPlayer
+    local char = plr.Character
+    if not char then return false end
+    if not char:FindFirstChild("Head") then return false end
+    local hum = char:FindFirstChild("Humanoid")
+    if not hum or hum.Health <= 0.1 then return false end
+    return true
+end
+
+local antiHitEnabled = false
+local antiHitConnection = nil
+
+local function startAntiHit()
+    if antiHitEnabled then return end
+    antiHitEnabled = true
+
+    antiHitConnection = task.spawn(function()
+        while antiHitEnabled do
+            task.wait()
+            if not antiHitEnabled then break end
+
+            for _, v in pairs(Players:GetPlayers()) do
+                if v ~= LocalPlayer and v.Team ~= LocalPlayer.Team and isAlive(v) and isAlive(LocalPlayer) then
+                    local lchar = LocalPlayer.Character
+                    local echar = v.Character
+                    if not (lchar and echar) then continue end
+
+                    local lhrp = lchar:FindFirstChild("HumanoidRootPart")
+                    local ehrp = echar:FindFirstChild("HumanoidRootPart")
+                    if not (lhrp and ehrp) then continue end
+
+                    if (lhrp.Position - ehrp.Position).Magnitude < 20 then
+                        if not lhrp:FindFirstChildOfClass("BodyVelocity") and not (ehrp.Velocity.Y < -50) then
+                            lchar.Archivable = true
+
+                            local posPart = Instance.new("Part")
+                            posPart.Anchored = true
+                            posPart.CanCollide = false
+                            posPart.Transparency = 1
+                            posPart.Size = Vector3.new(2, 2, 1)
+                            posPart.CFrame = lhrp.CFrame + Vector3.new(0, 4, 0)
+                            posPart.Parent = Workspace
+
+                            Camera.CameraSubject = posPart
+                            lhrp.CFrame = lhrp.CFrame - Vector3.new(0, 45, 0)
+
+                            local heartbeatConnection
+                            heartbeatConnection = RunService.Heartbeat:Connect(function()
+                                if posPart and lhrp then
+                                    posPart.CFrame = CFrame.new(
+                                        lhrp.Position.X,
+                                        posPart.Position.Y,
+                                        lhrp.Position.Z
+                                    )
+                                end
+                            end)
+
+                            task.wait(0.24)
+
+                            lhrp.Velocity = Vector3.new(lhrp.Velocity.X, 0, lhrp.Velocity.Z)
+                            lhrp.CFrame = posPart.CFrame
+                            Camera.CameraSubject = lchar:FindFirstChild("Humanoid")
+
+                            if heartbeatConnection then
+                                heartbeatConnection:Disconnect()
+                            end
+
+                            posPart:Destroy()
+                            task.wait(0.21)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopAntiHit()
+    antiHitEnabled = false
+    if antiHitConnection then
+        task.cancel(antiHitConnection)
+        antiHitConnection = nil
+    end
 end
 
 -- 🛠️ Build the GUI
@@ -260,6 +346,14 @@ for i, cat in ipairs(categories) do
                     startKillAura()
                 else
                     stopKillAura()
+                end
+            end)
+        elseif btnText == "ANTIHIT" then
+            createButton(content, btnText, function(toggled)
+                if toggled then
+                    startAntiHit()
+                else
+                    stopAntiHit()
                 end
             end)
         else
